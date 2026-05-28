@@ -1,62 +1,63 @@
-import requests
+"""Fetch Toronto consulting-services-expenditures resources for 2017-2024.
+
+Writes each resource to data/raw/. Re-running the script overwrites files.
+"""
+from __future__ import annotations
+
 import os
+import re
+from pathlib import Path
 
-def fetch_consulting_data():
-    # Toronto Open Data is stored in a CKAN instance. It's APIs are documented here:
-    # https://docs.ckan.org/en/latest/api/
-    
-    # To hit our API, you'll be making requests to:
-    base_url = "https://ckan0.cf.opendata.inter.prod-toronto.ca"
-    
-    # Datasets are called "packages". Each package can contain many "resources"
-    # To retrieve the metadata for this package and its resources, use the package name in this page's URL:
-    url = base_url + "/api/3/action/package_show"
-    params = { "id": "consulting-services-expenditures"}
-    package = requests.get(url, params = params).json()
-    
-    # Ensure the output directory exists
-    output_dir = "data/raw"
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+from api_client import download_resource, get_package, get_resource
 
-    # To get resource data:
-    for idx, resource in enumerate(package["result"]["resources"]):
-        
-        # Filter for resources related to 2017 to 2024
-        resource_name = resource["name"]
-        if not any(str(year) in resource_name for year in range(2017, 2025)):
+PACKAGE_ID = "consulting-services-expenditures"
+YEARS = range(2017, 2025)
+OUTPUT_DIR = Path("data/raw")
+
+
+def _safe_filename(name: str, default_ext: str = "csv") -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9._\- ]+", "", name).strip().replace(" ", "_")
+    if "." not in cleaned:
+        cleaned = f"{cleaned}.{default_ext.lower()}"
+    return cleaned
+
+
+def fetch_consulting_data() -> list[Path]:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    package = get_package(PACKAGE_ID)
+    downloaded: list[Path] = []
+
+    for resource in package["resources"]:
+        name = resource.get("name", "")
+        if not any(str(y) in name for y in YEARS):
             continue
 
-        print(f"Processing: {resource_name}")
-        
-        download_url = resource["url"]
-
-        # To get metadata for non datastore_active resources:
-        if not resource["datastore_active"]:
-            url = base_url + "/api/3/action/resource_show?id=" + resource["id"]
-            resource_metadata = requests.get(url).json()
-            # From here, you can use the "url" attribute to download this file
-            if resource_metadata.get("success"):
-                download_url = resource_metadata["result"]["url"]
-        
-        # Download the file
-        if download_url:
+        print(f"Processing: {name}")
+        download_url = resource.get("url")
+        if not resource.get("datastore_active", False):
             try:
-                response = requests.get(download_url)
-                response.raise_for_status()
-                
-                # Construct a safe filename
-                safe_name = "".join([c for c in resource_name if c.isalnum() or c in (' ', '-', '_')]).strip()
-                if "." not in safe_name:
-                    ext = resource.get("format", "csv").lower()
-                    safe_name = f"{safe_name}.{ext}"
-                
-                file_path = os.path.join(output_dir, safe_name)
-                with open(file_path, "wb") as f:
-                    f.write(response.content)
-                print(f"Downloaded to {file_path}")
-            except Exception as e:
-                print(f"Failed to download {resource_name}: {e}")
+                meta = get_resource(resource["id"])
+                download_url = meta.get("url", download_url)
+            except Exception as exc:
+                print(f"  resource_show fallback failed: {exc}")
+
+        if not download_url:
+            print(f"  no URL for {name}, skipping")
+            continue
+
+        ext = resource.get("format", "csv") or "csv"
+        dest = OUTPUT_DIR / _safe_filename(name, default_ext=ext)
+        try:
+            download_resource(download_url, str(dest))
+            print(f"  -> {dest}")
+            downloaded.append(dest)
+        except Exception as exc:
+            print(f"  failed: {exc}")
+
+    return downloaded
+
 
 if __name__ == "__main__":
-    fetch_consulting_data()
+    files = fetch_consulting_data()
+    print(f"\nDownloaded {len(files)} files to {OUTPUT_DIR.resolve()}")

@@ -1,0 +1,33 @@
+# Data — raw and processed artifacts are reproducible from src/
+data/raw/
+data/processed/
+data/interim/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Build / dist
+build/
+dist/
+*.egg-info/
+
+# Streamlit
+.streamlit/secrets.toml
